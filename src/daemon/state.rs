@@ -196,29 +196,53 @@ impl State {
                 process.wait().unwrap();
             }
             WallpaperMethod::Hyprpaper(args) => {
-                // Preload the wallpaper
-                self.send_to_hyprpaper(
-                    format!("preload {}", self.get_current_image().to_string_lossy()).as_bytes(),
-                )?;
-                // Display the wallpaper on every monitor
-                for monitor in args.monitors.iter() {
-                    self.send_to_hyprpaper(
-                        format!(
-                            "wallpaper {monitor},{}",
-                            self.get_current_image().to_string_lossy()
-                        )
-                        .as_bytes(),
-                    )?;
-                }
+                self.update_hyprpaper(args)?;
+            }
+            WallpaperMethod::Swww(args) => {
+                let angle = rand::thread_rng().gen_range(0..360);
+                let mut process = Command::new("swww")
+                    .arg("img")
+                    .arg("--transition-fps")
+                    .arg(format!("{}", args.fps))
+                    .arg("--transition-step")
+                    .arg(format!("{}", args.step))
+                    .arg("--transition-duration")
+                    .arg(format!("{}", args.duration))
+                    .arg("--transition-type")
+                    .arg("wipe")
+                    .arg("--transition-angle")
+                    .arg(format!("{}", angle))
+                    .arg(path)
+                    .spawn()
+                    .unwrap();
+                process.wait().unwrap();
+            }
+        }
+        Ok(())
+    }
 
-                if self.history.previous.len() > 2 {
-                    let prev = self.history.previous.iter().rev().nth(2).unwrap();
-                    if prev != self.get_current_image() {
-                        self.send_to_hyprpaper(
-                            format!("unload {}", prev.to_string_lossy()).as_bytes(),
-                        )?;
-                    }
-                }
+    fn update_hyprpaper(&self, args: &crate::HyprpaperOptions) -> Result<(), ()>  {
+        // Preload the wallpaper
+        self.send_to_hyprpaper(
+            format!("preload {}", self.get_current_image().to_string_lossy()).as_bytes(),
+        )?;
+        // Display the wallpaper on every monitor
+        for monitor in args.monitors.iter() {
+            self.send_to_hyprpaper(
+                format!(
+                    "wallpaper {monitor},{}",
+                    self.get_current_image().to_string_lossy()
+                )
+                .as_bytes(),
+            )?;
+        }
+
+        if self.history.previous.len() > 2 {
+            let prev = self.history.previous.iter().rev().nth(2).unwrap();
+            if prev != self.get_current_image() {
+                self.send_to_hyprpaper(
+                    format!("unload {}", prev.to_string_lossy()).as_bytes(),
+                )?;
             }
         }
         Ok(())
@@ -233,13 +257,19 @@ impl State {
         info!("Connecting to socket at {}", path.to_string_lossy());
 
         let mut listener = UnixStream::connect(path).map_err(|_| ())?;
+
         listener.write_all(msg).map_err(|_| ())?;
-
         listener.flush().map_err(|_| ())?;
+        info!("Written: {:?}", msg);
         let mut buffer = String::new();
-        listener.read_to_string(&mut buffer).map_err(|_| ())?;
 
+        info!("Created buffer");
+        listener.read_to_string(&mut buffer).map_err(|_| ())?;
         info!("Got result: {buffer}");
+
+        listener.write_all(b"").map_err(|_| ())?;
+        listener.flush().map_err(|_| ())?;
+
         Ok(buffer)
     }
 

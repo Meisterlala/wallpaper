@@ -63,6 +63,7 @@ pub enum WallpaperMethod {
     Feh,
     /// Use hyprpaper (for Hyprland / wlroots based wayland compositors)
     Hyprpaper(HyprpaperOptions),
+    Swww(SwwwOptions),
 }
 
 /// Hyprpaper needs a list of monitors. This struct holds them
@@ -70,6 +71,16 @@ pub enum WallpaperMethod {
 pub struct HyprpaperOptions {
     #[clap(value_parser)]
     monitors: Vec<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct SwwwOptions {
+    #[clap(long, default_value_t = 5)]
+    duration: u8,
+    #[clap(long, default_value_t = 120)]
+    fps: u8,
+    #[clap(long, default_value_t = 255)]
+    step: u8,
 }
 
 fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntError> {
