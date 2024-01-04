@@ -223,17 +223,14 @@ impl State {
 
     fn update_hyprpaper(&self, args: &crate::HyprpaperOptions) -> Result<(), ()>  {
         // Preload the wallpaper
-        self.send_to_hyprpaper(
-            format!("preload {}", self.get_current_image().to_string_lossy()).as_bytes(),
-        )?;
+        self.send_to_hyprpaper(&format!("preload {}", self.get_current_image().to_string_lossy()))?;
         // Display the wallpaper on every monitor
         for monitor in args.monitors.iter() {
             self.send_to_hyprpaper(
-                format!(
+                &format!(
                     "wallpaper {monitor},{}",
                     self.get_current_image().to_string_lossy()
                 )
-                .as_bytes(),
             )?;
         }
 
@@ -241,36 +238,25 @@ impl State {
             let prev = self.history.previous.iter().rev().nth(2).unwrap();
             if prev != self.get_current_image() {
                 self.send_to_hyprpaper(
-                    format!("unload {}", prev.to_string_lossy()).as_bytes(),
+                    &format!("unload {}", prev.to_string_lossy())
                 )?;
             }
         }
         Ok(())
     }
 
-    fn send_to_hyprpaper(&self, msg: &[u8]) -> Result<String, ()> {
-        let signature = std::env::var("HYPRLAND_INSTANCE_SIGNATURE").map_err(|_| ())?;
-        let path: PathBuf = ["/tmp/hypr", &signature, ".hyprpaper.sock"]
-            .iter()
-            .collect();
+    //TODO: use sockets again, don't spawn extra process
+    //TODO: do it all in one call when using sockets
+    //TODO: make monitors optional in hyprpaper-0.6.0, use wildcard
+    fn send_to_hyprpaper(&self, msg: &str) -> Result<(), ()> {
+        let mut process = Command::new("hyprctl")
+            .arg("hyprpaper")
+            .arg(msg)
+            .spawn()
+            .unwrap();
 
-        info!("Connecting to socket at {}", path.to_string_lossy());
-
-        let mut listener = UnixStream::connect(path).map_err(|_| ())?;
-
-        listener.write_all(msg).map_err(|_| ())?;
-        listener.flush().map_err(|_| ())?;
-        info!("Written: {:?}", msg);
-        let mut buffer = String::new();
-
-        info!("Created buffer");
-        listener.read_to_string(&mut buffer).map_err(|_| ())?;
-        info!("Got result: {buffer}");
-
-        listener.write_all(b"").map_err(|_| ())?;
-        listener.flush().map_err(|_| ())?;
-
-        Ok(buffer)
+        process.wait().unwrap();
+        Ok(())
     }
 
     pub fn update_action(&mut self, action: NextImage, image: Option<PathBuf>) {
