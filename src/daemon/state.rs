@@ -5,14 +5,10 @@ use rand::Rng;
 use std::{
     collections::VecDeque,
     fs,
-    io::{Read, Write},
-    os::unix::net::UnixStream,
     path::PathBuf,
     process::Command,
     time::Duration,
 };
-
-use crate::WallpaperMethod;
 
 #[derive(Debug)]
 struct History {
@@ -56,6 +52,13 @@ impl History {
     }
 }
 
+#[derive(Debug)]
+pub struct WallpaperCommands {
+    pub wallpaper_cmd: String,
+    pub wallpaper_post_cmd: Option<String>,
+    pub wallpaper_post_offset: Option<usize>,
+}
+
 /// Global object to store the current state
 #[derive(Debug)]
 pub struct State {
@@ -66,8 +69,7 @@ pub struct State {
     image_dir: PathBuf,
     use_fallback: bool,
     default_image: PathBuf,
-    wallpaper_cmd: WallpaperMethod,
-    recusive: bool,
+    wallpaper_cmds: WallpaperCommands,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Copy, ArgEnum)]
@@ -88,9 +90,8 @@ impl State {
         image_dir: PathBuf,
         default_image: PathBuf,
         action: NextImage,
-        wallpaper_cmd: WallpaperMethod,
+        wallpaper_cmds: WallpaperCommands,
         history_max_size: usize,
-        recusive: bool,
     ) -> Self {
         let mut history = VecDeque::new();
         history.push_back(default_image.clone());
@@ -107,8 +108,7 @@ impl State {
             image_dir,
             use_fallback: false,
             default_image,
-            wallpaper_cmd,
-            recusive,
+            wallpaper_cmds,
         }
     }
 
@@ -177,85 +177,28 @@ impl State {
         info!("Updating current wallpaper");
         let path = self.get_current_image();
         trace!("setting wallpaper to {}", path.to_string_lossy());
-        match &self.wallpaper_cmd {
-            WallpaperMethod::Feh => {
-                let mut process = if self.recusive {
-                    Command::new("feh")
-                        .arg("-r")
-                        .arg("--bg-fill")
-                        .arg(path)
-                        .spawn()
-                        .unwrap()
-                } else {
-                    Command::new("feh")
-                        .arg("--bg-fill")
-                        .arg(path)
-                        .spawn()
-                        .unwrap()
-                };
-                process.wait().unwrap();
-            }
-            WallpaperMethod::Hyprpaper(args) => {
-                self.update_hyprpaper(args)?;
-            }
-            WallpaperMethod::Swww(args) => {
-                let angle = rand::thread_rng().gen_range(0..360);
-                let mut process = Command::new("swww")
-                    .arg("img")
-                    .arg("--transition-fps")
-                    .arg(format!("{}", args.fps))
-                    .arg("--transition-step")
-                    .arg(format!("{}", args.step))
-                    .arg("--transition-duration")
-                    .arg(format!("{}", args.duration))
-                    .arg("--transition-type")
-                    .arg("wipe")
-                    .arg("--transition-angle")
-                    .arg(format!("{}", angle))
-                    .arg(path)
-                    .spawn()
-                    .unwrap();
-                process.wait().unwrap();
-            }
-        }
-        Ok(())
-    }
 
-    fn update_hyprpaper(&self, args: &crate::HyprpaperOptions) -> Result<(), ()>  {
-        // Preload the wallpaper
-        self.send_to_hyprpaper(&format!("preload {}", self.get_current_image().to_string_lossy()))?;
-        // Display the wallpaper on every monitor
-        for monitor in args.monitors.iter() {
-            self.send_to_hyprpaper(
-                &format!(
-                    "wallpaper {monitor},{}",
-                    self.get_current_image().to_string_lossy()
-                )
-            )?;
-        }
+        let wallpaper_cmd = self
+            .wallpaper_cmds
+            .wallpaper_cmd
+            .replace("%wallpaper%", path.to_str().unwrap());
 
-        if self.history.previous.len() > 2 {
-            let prev = self.history.previous.iter().rev().nth(2).unwrap();
-            if prev != self.get_current_image() {
-                self.send_to_hyprpaper(
-                    &format!("unload {}", prev.to_string_lossy())
-                )?;
-            }
-        }
-        Ok(())
-    }
-
-    //TODO: use sockets again, don't spawn extra process
-    //TODO: do it all in one call when using sockets
-    //TODO: make monitors optional in hyprpaper-0.6.0, use wildcard
-    fn send_to_hyprpaper(&self, msg: &str) -> Result<(), ()> {
-        let mut process = Command::new("hyprctl")
-            .arg("hyprpaper")
-            .arg(msg)
-            .spawn()
+        trace!("Calling {:?}", wallpaper_cmd);
+        let _process = Command::new("sh")
+            .arg("-c")
+            .arg(wallpaper_cmd)
+            .output()
             .unwrap();
 
-        process.wait().unwrap();
+        if let Some(delay) = self.wallpaper_cmds.wallpaper_post_offset {
+            if let Some(command) = &self.wallpaper_cmds.wallpaper_post_cmd {
+                if let Some(prev) = self.history.previous.iter().rev().nth(delay) {
+                    let prev = command.replace("%wallpaper%", prev.to_str().unwrap());
+                    trace!("Calling {:?}", prev);
+                    let _process = Command::new("sh").arg("-c").arg(&prev).output().unwrap();
+                }
+            }
+        }
         Ok(())
     }
 

@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, sleep};
 use std::time::Duration;
 
-use clap::{Args, Parser, Subcommand};
+use clap::Parser;
 use log::{debug, error, info};
 
 mod state;
@@ -31,15 +31,6 @@ pub struct Cli {
     /// Directory to search for images
     #[clap(short, long, value_parser, value_name = "DIRECTORY")]
     wallpaper_directory: PathBuf,
-    /// Seach for images recursively
-    #[clap(
-        short,
-        long,
-        value_parser,
-        value_name = "RECURSIVE",
-        default_value_t = false
-    )]
-    recursivly: bool,
     /// Time in seconds between wallpaper changes
     #[clap(short, long, parse(try_from_str = parse_duration))]
     interval: Option<Duration>,
@@ -51,36 +42,19 @@ pub struct Cli {
     history_length: usize,
     #[clap(short, long, arg_enum, default_value_t = NextImage::Static)]
     mode: NextImage,
-    /// Which underlying program to call to change the wallpaper
-    #[clap(subcommand)]
-    pub method: WallpaperMethod,
-}
-
-/// Program that gets called to change the active wallpaper
-#[derive(Subcommand, Debug)]
-pub enum WallpaperMethod {
-    /// Use Feh (for xorg)
-    Feh,
-    /// Use hyprpaper (for Hyprland / wlroots based wayland compositors)
-    Hyprpaper(HyprpaperOptions),
-    Swww(SwwwOptions),
-}
-
-/// Hyprpaper needs a list of monitors. This struct holds them
-#[derive(Args, Debug)]
-pub struct HyprpaperOptions {
-    #[clap(value_parser)]
-    monitors: Vec<String>,
-}
-
-#[derive(Args, Debug)]
-pub struct SwwwOptions {
-    #[clap(long, default_value_t = 5)]
-    duration: u8,
-    #[clap(long, default_value_t = 120)]
-    fps: u8,
-    #[clap(long, default_value_t = 255)]
-    step: u8,
+    /// Command to call to change the wallpaper
+    /// calls 'sh -c ${wallpaper_change_command}'
+    /// %wallpaper% gets replaced with the path to the wallpaper
+    #[clap(long)]
+    wallpaper_change_command: String,
+    /// Command to call after changing the wallpaper
+    /// calls 'sh -c ${wallpaper_post_change_command}'
+    /// %wallpaper% gets replaced with the path to the wallpaper
+    #[clap(long)]
+    wallpaper_post_change_command: Option<String>,
+    /// How many cycles of delay to keep
+    #[clap(long)]
+    wallpaper_post_change_offset: Option<usize>,
 }
 
 fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntError> {
@@ -114,14 +88,20 @@ fn main() {
     .expect("Error setting signal hooks");
 
     let time = cli.interval.unwrap_or(Duration::new(60, 0));
+
+    let wallpaper_cmds = WallpaperCommands {
+        wallpaper_cmd: cli.wallpaper_change_command,
+        wallpaper_post_cmd: cli.wallpaper_post_change_command,
+        wallpaper_post_offset: cli.wallpaper_post_change_offset,
+    };
+
     let data = Arc::new(Mutex::new(State::new(
         time,
         cli.wallpaper_directory,
         cli.default,
         cli.mode,
-        cli.method,
+        wallpaper_cmds,
         cli.history_length,
-        cli.recursivly,
     )));
 
     info!("Binding socket {:?}", socket);
