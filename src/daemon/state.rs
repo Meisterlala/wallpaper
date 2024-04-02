@@ -2,14 +2,8 @@
 use clap::clap_derive::ArgEnum;
 use log::{error, info, trace, warn};
 use rand::Rng;
-use serde::{Serialize, Deserialize};
-use std::{
-    collections::VecDeque,
-    fs,
-    path::PathBuf,
-    process::Command,
-    time::Duration,
-};
+use serde::{Deserialize, Serialize};
+use std::{collections::VecDeque, fs, path::PathBuf, process::Command, time::Duration};
 
 #[derive(Debug)]
 struct History {

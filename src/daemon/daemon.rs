@@ -14,7 +14,7 @@ use log::{debug, error, info};
 
 mod state;
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use state::*;
 
 //TODO: error handling
@@ -106,7 +106,6 @@ fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntEr
 fn main() {
     pretty_env_logger::init();
 
-
     let cli = Cli::parse();
     debug!("Command run was:\n{:?}", &cli);
 
@@ -117,8 +116,9 @@ fn main() {
                 let mut home = PathBuf::from(std::env::var("HOME").unwrap());
                 home.push(".config");
                 home
-        });
+            });
 
+        dotconfig.push("wallpaperd");
         dotconfig.push("wallpaperd.toml");
         dotconfig
     });
@@ -155,14 +155,21 @@ fn main() {
     let time = cli.interval.unwrap_or(Duration::from_secs(config.interval));
 
     let wallpaper_cmds = WallpaperCommands {
-        wallpaper_cmd: cli.wallpaper_change_command.unwrap_or(config.wallpaper_change_command),
-        wallpaper_post_cmd: cli.wallpaper_post_change_command.or(config.wallpaper_post_change_command),
-        wallpaper_post_offset: cli.wallpaper_post_change_offset.or(config.wallpaper_post_change_offset),
+        wallpaper_cmd: cli
+            .wallpaper_change_command
+            .unwrap_or(config.wallpaper_change_command),
+        wallpaper_post_cmd: cli
+            .wallpaper_post_change_command
+            .or(config.wallpaper_post_change_command),
+        wallpaper_post_offset: cli
+            .wallpaper_post_change_offset
+            .or(config.wallpaper_post_change_offset),
     };
 
     let data = Arc::new(Mutex::new(State::new(
         time,
-        cli.wallpaper_directory.unwrap_or(config.wallpaper_directory),
+        cli.wallpaper_directory
+            .unwrap_or(config.wallpaper_directory),
         cli.default.unwrap_or(config.default_image),
         cli.mode.unwrap_or(config.mode),
         wallpaper_cmds,
