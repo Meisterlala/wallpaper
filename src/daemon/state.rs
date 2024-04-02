@@ -2,6 +2,7 @@
 use clap::clap_derive::ArgEnum;
 use log::{error, info, trace, warn};
 use rand::Rng;
+use serde::{Serialize, Deserialize};
 use std::{
     collections::VecDeque,
     fs,
@@ -72,7 +73,7 @@ pub struct State {
     wallpaper_cmds: WallpaperCommands,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Copy, ArgEnum)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy, ArgEnum, Serialize, Deserialize)]
 pub enum NextImage {
     Random,
     Linear,
@@ -95,6 +96,22 @@ impl State {
     ) -> Self {
         let mut history = VecDeque::new();
         history.push_back(default_image.clone());
+
+        let image_dir = if image_dir.starts_with("~/") {
+            let mut home = PathBuf::from(std::env::var("HOME").unwrap());
+            home.push(image_dir.components().skip(1).collect::<PathBuf>());
+            home
+        } else {
+            image_dir
+        };
+
+        let default_image = if default_image.starts_with("~/") {
+            let mut home = PathBuf::from(std::env::var("HOME").unwrap());
+            home.push(default_image.components().skip(1).collect::<PathBuf>());
+            home
+        } else {
+            default_image
+        };
 
         State {
             history: History {

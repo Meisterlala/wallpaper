@@ -14,6 +14,7 @@ use log::{debug, error, info};
 
 mod state;
 
+use serde::{Serialize, Deserialize};
 use state::*;
 
 //TODO: error handling
@@ -22,15 +23,17 @@ use state::*;
 #[derive(Parser, Debug)]
 #[clap(version)]
 pub struct Cli {
+    #[clap(short, long, value_parser, value_name = "FILE")]
+    config: Option<PathBuf>,
     /// Image to show by default
     #[clap(short, long, value_parser, value_name = "FILE")]
-    default: PathBuf,
+    default: Option<PathBuf>,
     /// Socket for communication
     #[clap(short, long, value_parser, value_name = "FILE")]
     socket: Option<PathBuf>,
     /// Directory to search for images
     #[clap(short, long, value_parser, value_name = "DIRECTORY")]
-    wallpaper_directory: PathBuf,
+    wallpaper_directory: Option<PathBuf>,
     /// Time in seconds between wallpaper changes
     #[clap(short, long, parse(try_from_str = parse_duration))]
     interval: Option<Duration>,
@@ -38,15 +41,15 @@ pub struct Cli {
     #[clap(long)]
     fd: Option<RawFd>,
     /// Maximum size of the history (used for getting the previous wallpaper)
-    #[clap(long, default_value_t = 25)]
-    history_length: usize,
-    #[clap(short, long, arg_enum, default_value_t = NextImage::Static)]
-    mode: NextImage,
+    #[clap(long)]
+    history_length: Option<usize>,
+    #[clap(short, long, arg_enum)]
+    mode: Option<NextImage>,
     /// Command to call to change the wallpaper
     /// calls 'sh -c ${wallpaper_change_command}'
     /// %wallpaper% gets replaced with the path to the wallpaper
     #[clap(long)]
-    wallpaper_change_command: String,
+    wallpaper_change_command: Option<String>,
     /// Command to call after changing the wallpaper
     /// calls 'sh -c ${wallpaper_post_change_command}'
     /// %wallpaper% gets replaced with the path to the wallpaper
@@ -57,6 +60,44 @@ pub struct Cli {
     wallpaper_post_change_offset: Option<usize>,
 }
 
+#[derive(Serialize, Deserialize)]
+struct Config {
+    /// Image to show by default
+    default_image: PathBuf,
+    /// Directory to search for images
+    wallpaper_directory: PathBuf,
+    /// Time in seconds between wallpaper changes
+    interval: u64,
+    /// Maximum size of the history (used for getting the previous wallpaper)
+    history_length: usize,
+    mode: NextImage,
+    /// Command to call to change the wallpaper
+    /// calls 'sh -c ${wallpaper_change_command}'
+    /// %wallpaper% gets replaced with the path to the wallpaper
+    wallpaper_change_command: String,
+    /// Command to call after changing the wallpaper
+    /// calls 'sh -c ${wallpaper_post_change_command}'
+    /// %wallpaper% gets replaced with the path to the wallpaper
+    wallpaper_post_change_command: Option<String>,
+    /// How many cycles of delay to keep
+    wallpaper_post_change_offset: Option<usize>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            default_image: PathBuf::from_str("~/Pictures/wallpaper.png").unwrap(),
+            wallpaper_directory: PathBuf::from_str("~/Pictures/wallpapers/").unwrap(),
+            interval: 60,
+            history_length: 25,
+            mode: NextImage::Random,
+            wallpaper_change_command: "feh -r %wallpaper%".to_owned(),
+            wallpaper_post_change_command: None,
+            wallpaper_post_change_offset: None,
+        }
+    }
+}
+
 fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntError> {
     let seconds = arg.parse()?;
     Ok(std::time::Duration::from_secs(seconds))
@@ -65,8 +106,32 @@ fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntEr
 fn main() {
     pretty_env_logger::init();
 
+
     let cli = Cli::parse();
     debug!("Command run was:\n{:?}", &cli);
+
+    let config_file = cli.config.unwrap_or_else(|| {
+        let mut dotconfig = std::env::var("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_arg| {
+                let mut home = PathBuf::from(std::env::var("HOME").unwrap());
+                home.push(".config");
+                home
+        });
+
+        dotconfig.push("wallpaperd.toml");
+        dotconfig
+    });
+
+    let config = if config_file.is_file() {
+        // Parse config with serde
+        let config = fs::read_to_string(config_file).expect("Couldn't read config file");
+        let config: Config = toml::from_str(&config).expect("Invalid config");
+        config
+    } else {
+        Config::default()
+    };
+
     let socket = cli.socket.unwrap_or_else(|| {
         if let Ok(path) = std::env::var("XDG_RUNTIME_DIR") {
             let mut pathbuf = PathBuf::new();
@@ -87,21 +152,21 @@ fn main() {
     })
     .expect("Error setting signal hooks");
 
-    let time = cli.interval.unwrap_or(Duration::new(60, 0));
+    let time = cli.interval.unwrap_or(Duration::from_secs(config.interval));
 
     let wallpaper_cmds = WallpaperCommands {
-        wallpaper_cmd: cli.wallpaper_change_command,
-        wallpaper_post_cmd: cli.wallpaper_post_change_command,
-        wallpaper_post_offset: cli.wallpaper_post_change_offset,
+        wallpaper_cmd: cli.wallpaper_change_command.unwrap_or(config.wallpaper_change_command),
+        wallpaper_post_cmd: cli.wallpaper_post_change_command.or(config.wallpaper_post_change_command),
+        wallpaper_post_offset: cli.wallpaper_post_change_offset.or(config.wallpaper_post_change_offset),
     };
 
     let data = Arc::new(Mutex::new(State::new(
         time,
-        cli.wallpaper_directory,
-        cli.default,
-        cli.mode,
+        cli.wallpaper_directory.unwrap_or(config.wallpaper_directory),
+        cli.default.unwrap_or(config.default_image),
+        cli.mode.unwrap_or(config.mode),
         wallpaper_cmds,
-        cli.history_length,
+        cli.history_length.unwrap_or(config.history_length),
     )));
 
     info!("Binding socket {:?}", socket);

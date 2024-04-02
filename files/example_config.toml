@@ -1,0 +1,8 @@
+default_image = "~/Pictures/wallpapers/foh0n427ez471.png"
+wallpaper_directory = "~/Pictures/wallpapers/"
+interval = 60
+history_length = 25
+mode = "Random"
+wallpaper_change_command = "hyprctl hyprpaper preload %wallpaper% && hyprctl hyprpaper wallpaper DP-1,%wallpaper% && hyprctl hyprpaper wallpaper DP-2,%wallpaper%"
+wallpaper_post_change_command = "hyprctl hyprpaper unload %wallpaper%"
+wallpaper_post_change_offset = 2
