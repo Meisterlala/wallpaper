@@ -12,17 +12,15 @@ use std::time::Duration;
 use clap::Parser;
 use log::{debug, error, info};
 
-mod state;
-
+use crate::state::*;
 use serde::{Deserialize, Serialize};
-use state::*;
 
 //TODO: error handling
 
 /// Struct to hold and parse cli arguments
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, PartialEq, Eq)]
 #[clap(version)]
-pub struct Cli {
+pub struct DaemonArgs {
     #[clap(short, long, value_parser, value_name = "FILE")]
     config: Option<PathBuf>,
     /// Image to show by default
@@ -103,13 +101,10 @@ fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntEr
     Ok(std::time::Duration::from_secs(seconds))
 }
 
-fn main() {
-    pretty_env_logger::init();
+pub fn start_daemon(args: DaemonArgs) {
+    debug!("Command run was:\n{:?}", &args);
 
-    let cli = Cli::parse();
-    debug!("Command run was:\n{:?}", &cli);
-
-    let config_file = cli.config.unwrap_or_else(|| {
+    let config_file = args.config.unwrap_or_else(|| {
         let mut dotconfig = std::env::var("XDG_CONFIG_HOME")
             .map(PathBuf::from)
             .unwrap_or_else(|_arg| {
@@ -132,7 +127,7 @@ fn main() {
         Config::default()
     };
 
-    let socket = cli.socket.unwrap_or_else(|| {
+    let socket = args.socket.unwrap_or_else(|| {
         if let Ok(path) = std::env::var("XDG_RUNTIME_DIR") {
             let mut pathbuf = PathBuf::new();
             pathbuf.push(path);
@@ -152,36 +147,38 @@ fn main() {
     })
     .expect("Error setting signal hooks");
 
-    let time = cli.interval.unwrap_or(Duration::from_secs(config.interval));
+    let time = args
+        .interval
+        .unwrap_or(Duration::from_secs(config.interval));
 
     let wallpaper_cmds = WallpaperCommands {
-        wallpaper_cmd: cli
+        wallpaper_cmd: args
             .wallpaper_change_command
             .unwrap_or(config.wallpaper_change_command),
-        wallpaper_post_cmd: cli
+        wallpaper_post_cmd: args
             .wallpaper_post_change_command
             .or(config.wallpaper_post_change_command),
-        wallpaper_post_offset: cli
+        wallpaper_post_offset: args
             .wallpaper_post_change_offset
             .or(config.wallpaper_post_change_offset),
     };
 
     let data = Arc::new(Mutex::new(State::new(
         time,
-        cli.wallpaper_directory
+        args.wallpaper_directory
             .unwrap_or(config.wallpaper_directory),
-        cli.default.unwrap_or(config.default_image),
-        cli.mode.unwrap_or(config.mode),
+        args.default.unwrap_or(config.default_image),
+        args.mode.unwrap_or(config.mode),
         wallpaper_cmds,
-        cli.history_length.unwrap_or(config.history_length),
+        args.history_length.unwrap_or(config.history_length),
     )));
 
     info!("Binding socket {:?}", socket);
     let listener = UnixListener::bind(&socket).unwrap();
     let incoming = listener.incoming();
 
-    if cli.fd.is_some() {
-        let mut file = unsafe { File::from_raw_fd(cli.fd.unwrap()) };
+    if args.fd.is_some() {
+        let mut file = unsafe { File::from_raw_fd(args.fd.unwrap()) };
         writeln!(&mut file).unwrap();
     }
 
@@ -226,13 +223,14 @@ fn read_from_stream(mut stream: &UnixStream) -> String {
 #[derive(Parser)]
 struct ClientMessage {
     #[clap(subcommand)]
-    command: common::Command,
+    command: crate::command::Command,
 }
 
 // Thread: Client <---> Server
 fn handle_connection(mut stream: UnixStream, state: Arc<Mutex<State>>) -> bool {
-    use common::*;
+    use crate::command::*;
     use std::io::prelude::*;
+
     info!("Handle new connection");
     let line = read_from_stream(&stream);
     let mut response = "".to_string();
@@ -293,6 +291,7 @@ fn handle_connection(mut stream: UnixStream, state: Arc<Mutex<State>>) -> bool {
                 GetArgs::Fallback => state.lock().unwrap().get_fallback().to_string(),
             }
         }
+        Command::Daemon(_) => todo!(),
     }
 
     stream.write_all(response.as_bytes()).unwrap();

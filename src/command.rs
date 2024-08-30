@@ -2,7 +2,9 @@ use std::{fmt::Display, path::PathBuf, time::Duration};
 
 use clap::{Args, Subcommand};
 
-#[derive(Subcommand)]
+use crate::daemon::DaemonArgs;
+
+#[derive(Subcommand, PartialEq, Eq)]
 pub enum Command {
     /// Show the next image
     Next,
@@ -21,27 +23,28 @@ pub enum Command {
     /// Query information about the current state
     #[clap(subcommand)]
     Get(GetArgs),
+    Daemon(DaemonArgs),
 }
 
-#[derive(Args)]
+#[derive(Args, PartialEq, Eq)]
 pub struct IntervalDuration {
     #[clap(parse(try_from_str = parse_duration))]
     pub duration: Duration,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, PartialEq, Eq)]
 pub enum ModeArgs {
     Linear,
     Random,
     Static(Image),
 }
 
-#[derive(Args)]
+#[derive(Args, PartialEq, Eq)]
 pub struct Image {
     pub path: Option<PathBuf>,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, PartialEq, Eq)]
 pub enum GetArgs {
     Wallpaper,
     Duration,
@@ -79,6 +82,7 @@ impl Display for Command {
                 GetArgs::Mode => "get mode".to_string(),
                 GetArgs::Fallback => "get fallback".to_string(),
             },
+            Command::Daemon(_) => "daemon".to_string(),
         };
         write!(f, "{args}")
     }

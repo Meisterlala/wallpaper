@@ -6,16 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [[bin]]
-name = "wallpaperd"
-path = "src/daemon/daemon.rs"
-
-[[bin]]
 name = "wp"
-path = "src/cli/client.rs"
-
-[lib]
-name = "common"
-path = "src/common/lib.rs"
+path = "src/main.rs"
 
 [profile.release]
 strip = true  # Automatically strip symbols from the binary.
