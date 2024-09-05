@@ -45,6 +45,10 @@ impl History {
         }
         self.previous.push_back(path);
     }
+
+    fn contains(&self, path: &PathBuf) -> bool {
+        self.previous.contains(path)
+    }
 }
 
 #[derive(Debug)]
@@ -140,32 +144,35 @@ impl State {
                 if self.history.has_next() {
                     self.history.go_next();
                 } else {
-                    // If not enough space delete one element
-                    let mut idx = fs::read_dir(&self.image_dir)
-                        .unwrap()
-                        .filter_map(|res| res.ok().map(|e| e.path()))
-                        .position(|elem| elem == *self.history.previous.back().unwrap())
-                        .unwrap_or(0);
+                    let num_pics = fs::read_dir(&self.image_dir).unwrap().count();
 
-                    let num_pics = fs::read_dir(&self.image_dir)
-                        .unwrap()
-                        .filter_map(|res| res.ok().map(|e| e.path()))
-                        .count();
+                    loop {
+                        let idx = if self.action == NextImage::Random {
+                            rand::thread_rng().gen_range(0..num_pics)
+                        } else {
+                            let mut idx = fs::read_dir(&self.image_dir)
+                                .unwrap()
+                                .filter_map(|res| res.ok().map(|e| e.path()))
+                                .position(|elem| elem == *self.history.previous.back().unwrap())
+                                .unwrap_or(0);
+                            idx += 1;
+                            idx %= num_pics;
+                            idx
+                        };
 
-                    if self.action == NextImage::Random {
-                        idx = rand::thread_rng().gen_range(0..num_pics);
-                    } else {
-                        idx += 1;
-                        idx %= num_pics;
-                    }
-
-                    self.history.push_back(
-                        fs::read_dir(&self.image_dir)
+                        let wallpaper_path = fs::read_dir(&self.image_dir)
                             .unwrap()
                             .filter_map(|res| res.ok().map(|e| e.path()))
                             .nth(idx)
-                            .unwrap(),
-                    );
+                            .unwrap();
+
+                        if !self.history.contains(&wallpaper_path)
+                            || num_pics <= self.history.history_max_size
+                        {
+                            self.history.push_back(wallpaper_path);
+                            break;
+                        }
+                    }
                 }
             }
             ChangeImageDirection::Previous => {
