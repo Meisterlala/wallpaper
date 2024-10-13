@@ -33,8 +33,8 @@ pub struct DaemonArgs {
     #[clap(short, long, value_parser, value_name = "DIRECTORY")]
     wallpaper_directory: Option<PathBuf>,
     /// Time in seconds between wallpaper changes
-    #[clap(short, long, parse(try_from_str = parse_duration))]
-    interval: Option<Duration>,
+    #[clap(short, long, parse(try_from_str = parse_duration), default_value = "60")]
+    interval: Duration,
     /// File descriptor to write to to signal readiness
     #[clap(long)]
     fd: Option<RawFd>,
@@ -47,19 +47,19 @@ pub struct DaemonArgs {
     /// calls 'sh -c ${wallpaper_change_command}'
     /// %wallpaper% gets replaced with the path to the wallpaper
     #[clap(long)]
-    wallpaper_change_command: Option<String>,
+    pub wallpaper_change_command: Option<String>,
     /// Command to call after changing the wallpaper
     /// calls 'sh -c ${wallpaper_post_change_command}'
     /// %wallpaper% gets replaced with the path to the wallpaper
     #[clap(long)]
-    wallpaper_post_change_command: Option<String>,
+    pub wallpaper_post_change_command: Option<String>,
     /// How many cycles of delay to keep
     #[clap(long)]
-    wallpaper_post_change_offset: Option<usize>,
+    pub wallpaper_post_change_offset: Option<usize>,
 }
 
 #[derive(Serialize, Deserialize)]
-struct Config {
+pub struct Config {
     /// Image to show by default
     default_image: PathBuf,
     /// Directory to search for images
@@ -72,13 +72,13 @@ struct Config {
     /// Command to call to change the wallpaper
     /// calls 'sh -c ${wallpaper_change_command}'
     /// %wallpaper% gets replaced with the path to the wallpaper
-    wallpaper_change_command: String,
+    pub wallpaper_change_command: String,
     /// Command to call after changing the wallpaper
     /// calls 'sh -c ${wallpaper_post_change_command}'
     /// %wallpaper% gets replaced with the path to the wallpaper
-    wallpaper_post_change_command: Option<String>,
+    pub wallpaper_post_change_command: Option<String>,
     /// How many cycles of delay to keep
-    wallpaper_post_change_offset: Option<usize>,
+    pub wallpaper_post_change_offset: Option<usize>,
 }
 
 impl Default for Config {
@@ -96,75 +96,115 @@ impl Default for Config {
     }
 }
 
+impl FromStr for Config {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut config = Config::default();
+        for line in s.lines() {
+            let split: Vec<&str> = line.split("=").collect();
+            let left = split[0].trim();
+            let right = split[1]
+                .trim()
+                .trim_start_matches('"')
+                .trim_end_matches('"')
+                .trim();
+            match left {
+                "default_image" => config.default_image = right.into(),
+                "wallpaper_directory" => config.wallpaper_directory = right.into(),
+                "interval" => {
+                    if let Ok(seconds) = u64::from_str(right) {
+                        config.interval = seconds;
+                    } else {
+                        error!("Couldn't parse interval in config file");
+                    }
+                }
+                "history_length" => {
+                    if let Ok(length) = usize::from_str(right) {
+                        config.history_length = length;
+                    } else {
+                        error!("Couldn't parse history_length in config file");
+                    }
+                }
+                "mode" => {
+                    config.mode = match right {
+                        "Random" => NextImage::Random,
+                        "Linear" => NextImage::Linear,
+                        "Static" => NextImage::Static,
+                        _ => {
+                            error!("Unknown wallpaper mode: {right}");
+                            config.mode
+                        }
+                    }
+                }
+                "wallpaper_change_command" => config.wallpaper_change_command = right.into(),
+                "wallpaper_post_change_command" => {
+                    config.wallpaper_post_change_command = Some(right.into())
+                }
+                "wallpaper_post_change_offset" => {
+                    if let Ok(offset) = usize::from_str(right) {
+                        config.wallpaper_post_change_offset = Some(offset);
+                    } else {
+                        error!("Couldn't parse wallpaper_post_change_offset");
+                    }
+                }
+                _ => {
+                    error!("{left} isn't a valid key");
+                }
+            }
+        }
+        Ok(config)
+    }
+}
+
 fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntError> {
     let seconds = arg.parse()?;
     Ok(std::time::Duration::from_secs(seconds))
 }
 
+#[derive(Debug)]
+struct UnixSocketWithDrop {
+    path: PathBuf,
+    socket: UnixListener,
+}
+
+impl Drop for UnixSocketWithDrop {
+    fn drop(&mut self) {
+        std::fs::remove_file(&self.path).unwrap();
+        info!("Removing socket file");
+    }
+}
+
 pub fn start_daemon(args: DaemonArgs) {
-    debug!("Command run was:\n{:?}", &args);
-
-    let config_file = args.config.unwrap_or_else(|| {
-        let mut dotconfig = std::env::var("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_arg| {
-                let mut home = PathBuf::from(std::env::var("HOME").unwrap());
-                home.push(".config");
-                home
-            });
-
-        dotconfig.push("wallpaperd");
-        dotconfig.push("wallpaperd.toml");
-        dotconfig
-    });
+    let config_file = get_config_file(&args);
 
     let config = if config_file.is_file() {
-        // Parse config with serde
         let config = fs::read_to_string(config_file).expect("Couldn't read config file");
-        let config: Config = toml::from_str(&config).expect("Invalid config");
+        // Can't fail
+        let config = Config::from_str(&config).unwrap();
         config
     } else {
         Config::default()
     };
 
-    let socket = args.socket.unwrap_or_else(|| {
-        if let Ok(path) = std::env::var("XDG_RUNTIME_DIR") {
-            let mut pathbuf = PathBuf::new();
-            pathbuf.push(path);
-            pathbuf.push("wallpaperd");
-            pathbuf
-        } else {
-            PathBuf::from_str("/tmp/wallpaperd").unwrap()
-        }
-    });
+    let wallpaper_cmds = WallpaperCommands::new(&args, &config);
 
-    let s = socket.clone();
+    let socket = get_socket(&args);
+    info!("Binding socket {:?}", socket);
+
+    let s = socket.path.clone();
     ctrlc::set_handler(move || {
         if fs::remove_file(&s).is_err() {
             error!("Couldn't delete socket file");
         }
-        exit(1);
+        exit(0);
     })
     .expect("Error setting signal hooks");
 
-    let time = args
-        .interval
-        .unwrap_or(Duration::from_secs(config.interval));
-
-    let wallpaper_cmds = WallpaperCommands {
-        wallpaper_cmd: args
-            .wallpaper_change_command
-            .unwrap_or(config.wallpaper_change_command),
-        wallpaper_post_cmd: args
-            .wallpaper_post_change_command
-            .or(config.wallpaper_post_change_command),
-        wallpaper_post_offset: args
-            .wallpaper_post_change_offset
-            .or(config.wallpaper_post_change_offset),
-    };
+    let incoming = socket.socket.incoming();
 
     let data = Arc::new(Mutex::new(State::new(
-        time,
+        args.interval,
         args.wallpaper_directory
             .unwrap_or(config.wallpaper_directory),
         args.default.unwrap_or(config.default_image),
@@ -172,10 +212,6 @@ pub fn start_daemon(args: DaemonArgs) {
         wallpaper_cmds,
         args.history_length.unwrap_or(config.history_length),
     )));
-
-    info!("Binding socket {:?}", socket);
-    let listener = UnixListener::bind(&socket).unwrap();
-    let incoming = listener.incoming();
 
     if args.fd.is_some() {
         let mut file = unsafe { File::from_raw_fd(args.fd.unwrap()) };
@@ -194,12 +230,45 @@ pub fn start_daemon(args: DaemonArgs) {
             }
         }
     }
+}
 
-    if fs::remove_file(&socket).is_err() {
-        error!("Couldn't delete socket file");
-        exit(1);
-    }
-    exit(0);
+fn get_config_file(args: &DaemonArgs) -> PathBuf {
+    args.config.as_ref().map_or_else(
+        || {
+            let mut dotconfig = std::env::var("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_arg| {
+                    let mut home = PathBuf::from(std::env::var("HOME").unwrap());
+                    home.push(".config");
+                    home
+                });
+
+            dotconfig.push("wallpaperd");
+            dotconfig.push("wallpaperd.toml");
+            dotconfig
+        },
+        |val| val.to_owned(),
+    )
+}
+
+fn get_socket(args: &DaemonArgs) -> UnixSocketWithDrop {
+    let path = args.socket.as_ref().map_or_else(
+        || {
+            if let Ok(path) = std::env::var("XDG_RUNTIME_DIR") {
+                let mut pathbuf = PathBuf::new();
+                pathbuf.push(path);
+                pathbuf.push("wallpaperd");
+                pathbuf
+            } else {
+                PathBuf::from_str("/tmp/wallpaperd").unwrap()
+            }
+        },
+        |val| val.to_owned(),
+    );
+
+    let socket = UnixListener::bind(&path).unwrap();
+
+    UnixSocketWithDrop { path, socket }
 }
 
 fn read_from_stream(mut stream: &UnixStream) -> String {

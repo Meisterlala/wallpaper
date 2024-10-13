@@ -5,6 +5,8 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, fs, path::PathBuf, process::Command, time::Duration};
 
+use crate::daemon::{Config, DaemonArgs};
+
 #[derive(Debug)]
 struct History {
     previous: VecDeque<PathBuf>, // Never empty
@@ -56,6 +58,29 @@ pub struct WallpaperCommands {
     pub wallpaper_cmd: String,
     pub wallpaper_post_cmd: Option<String>,
     pub wallpaper_post_offset: Option<usize>,
+}
+
+impl WallpaperCommands {
+    pub fn new(args: &DaemonArgs, config: &Config) -> Self {
+        let wallpaper_cmd = args
+            .wallpaper_change_command
+            .as_ref()
+            .unwrap_or(&config.wallpaper_change_command);
+        let wallpaper_post_cmd = args
+            .wallpaper_post_change_command
+            .as_ref()
+            .or(config.wallpaper_post_change_command.as_ref());
+        let wallpaper_post_offset = args
+            .wallpaper_post_change_offset
+            .as_ref()
+            .or(config.wallpaper_post_change_offset.as_ref());
+
+        WallpaperCommands {
+            wallpaper_cmd: wallpaper_cmd.to_owned(),
+            wallpaper_post_cmd: wallpaper_post_cmd.cloned(),
+            wallpaper_post_offset: wallpaper_post_offset.cloned(),
+        }
+    }
 }
 
 /// Global object to store the current state

@@ -20,4 +20,3 @@ rand = "0.8.5"
 clap = { version = "3.2.11", features = ["derive", "cargo"] }
 ctrlc = { version = "3.2.2", features = ["termination"] }
 serde = { version = "1.0.197", features = ["derive"] }
-toml = "0.8.12"
