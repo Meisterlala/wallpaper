@@ -2,7 +2,6 @@
 use clap::clap_derive::ArgEnum;
 use log::{error, info, trace, warn};
 use rand::Rng;
-use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, fs, path::PathBuf, process::Command, time::Duration};
 
 use crate::daemon::{Config, DaemonArgs};
@@ -96,7 +95,7 @@ pub struct State {
     wallpaper_cmds: WallpaperCommands,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Copy, ArgEnum, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy, ArgEnum)]
 pub enum NextImage {
     Random,
     Linear,

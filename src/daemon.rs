@@ -13,8 +13,6 @@ use clap::Parser;
 use log::{debug, error, info};
 
 use crate::state::*;
-use serde::{Deserialize, Serialize};
-
 //TODO: error handling
 
 /// Struct to hold and parse cli arguments
@@ -58,7 +56,6 @@ pub struct DaemonArgs {
     pub wallpaper_post_change_offset: Option<usize>,
 }
 
-#[derive(Serialize, Deserialize)]
 pub struct Config {
     /// Image to show by default
     default_image: PathBuf,
