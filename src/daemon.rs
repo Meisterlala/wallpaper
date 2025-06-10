@@ -178,8 +178,7 @@ pub fn start_daemon(args: DaemonArgs) {
     let config = if config_file.is_file() {
         let config = fs::read_to_string(config_file).expect("Couldn't read config file");
         // Can't fail
-        let config = Config::from_str(&config).unwrap();
-        config
+        Config::from_str(&config).unwrap()
     } else {
         Config::default()
     };
@@ -355,9 +354,13 @@ fn handle_connection(mut stream: UnixStream, state: Arc<Mutex<State>>) -> bool {
                     }
                 }
                 GetArgs::Fallback => state.lock().unwrap().get_fallback().to_string(),
+                GetArgs::WpDir => state.lock().unwrap().get_image_dir().to_str().unwrap().to_owned(),
             }
         }
         Command::Daemon(_) => todo!(),
+        Command::WpDir(wallpaper_directory) => {
+            state.lock().unwrap().set_image_dir(wallpaper_directory.path);
+        }
     }
 
     stream.write_all(response.as_bytes()).unwrap();

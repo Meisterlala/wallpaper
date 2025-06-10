@@ -1,4 +1,4 @@
-use std::{fmt::Display, path::PathBuf, time::Duration};
+use std::{fmt::{format, Display}, path::PathBuf, time::Duration};
 
 use clap::{Args, Subcommand};
 
@@ -18,6 +18,8 @@ pub enum Command {
     /// Display the fallback wallpaper
     /// If called again displays the previous image
     Fallback,
+    /// Change the directory from which images are sourced
+    WpDir(WallpaperDirectory),
     /// Set the interval for new images in seconds
     Interval(IntervalDuration),
     /// Query information about the current state
@@ -30,6 +32,11 @@ pub enum Command {
 pub struct IntervalDuration {
     #[clap(parse(try_from_str = parse_duration))]
     pub duration: Duration,
+}
+
+#[derive(Args, PartialEq, Eq)]
+pub struct WallpaperDirectory {
+    pub path: PathBuf,
 }
 
 #[derive(Subcommand, PartialEq, Eq)]
@@ -50,6 +57,7 @@ pub enum GetArgs {
     Duration,
     Mode,
     Fallback,
+    WpDir,
 }
 
 fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntError> {
@@ -81,8 +89,12 @@ impl Display for Command {
                 GetArgs::Duration => "get duration".to_string(),
                 GetArgs::Mode => "get mode".to_string(),
                 GetArgs::Fallback => "get fallback".to_string(),
+                GetArgs::WpDir => "get wp-dir".to_string(),
             },
             Command::Daemon(_) => "daemon".to_string(),
+            Command::WpDir(wallpaper_directory) => {
+                format!("wp-dir {}", wallpaper_directory.path.to_str().unwrap().to_owned())
+            }
         };
         write!(f, "{args}")
     }

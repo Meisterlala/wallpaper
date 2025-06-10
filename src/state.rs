@@ -271,6 +271,15 @@ impl State {
         }
     }
 
+    pub fn set_image_dir(&mut self, dir: PathBuf) {
+        self.image_dir = dir;
+        self.update().unwrap();
+    }
+
+    pub fn get_image_dir(&self) -> &PathBuf {
+        &self.image_dir
+    }
+
     pub fn get_current_image(&self) -> &PathBuf {
         self.history.previous.back().unwrap()
     }
